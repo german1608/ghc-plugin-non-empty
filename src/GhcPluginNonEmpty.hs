@@ -76,10 +76,10 @@ import GHC.Types.TyThing (MonadThings (lookupId))
 import GHC.Types.Var (Id)
 import GHC.Unit.Finder (FindResult (..), findImportedModule)
 import GHC.Unit.Module.ModSummary (ModSummary)
-import GHC.Utils.Outputable (defaultSDocContext, renderWithContext, sdocPrintTypecheckerElaboration,
-                             text)
+import GHC.Utils.Outputable (Outputable, defaultSDocContext, ppr, renderWithContext,
+                             sdocPrintTypecheckerElaboration, text)
 import Language.Haskell.Syntax.Decls (HsGroup)
-import Language.Haskell.Syntax.Expr (HsExpr (..), LHsExpr)
+import Language.Haskell.Syntax.Expr (ArithSeqInfo (..), HsExpr (..), LHsExpr)
 import Language.Haskell.Syntax.Extension (NoExtField (..))
 
 import Control.Monad.IO.Class (MonadIO (..))
@@ -87,6 +87,7 @@ import Data.Generics.Aliases (mkM, mkT)
 import Data.Generics.Schemes (everywhere, everywhereM)
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
+import Debug.Trace
 
 import qualified GHC
 
@@ -154,11 +155,18 @@ rewriteListLiterals ghcPluginNonEmptyFromListName nonEmptyCtor = \case
     l@(L _ ExplicitList{}) ->
         -- this becomes:
         -- _xxx_ghc_plugin_nonEmpty_fromList cons [3, 1, 2]
-        app (app (var ghcPluginNonEmptyFromListName) (var nonEmptyCtor)) l
+        wrapGhcPluginNonEmptyFromListName l
+
+    a@(L _ ArithSeq{}) ->
+        wrapGhcPluginNonEmptyFromListName a
 
     -- don't touch other expresions
     expr ->
         expr
+  where
+    wrapGhcPluginNonEmptyFromListName :: LHsExpr GhcRn -> LHsExpr GhcRn
+    wrapGhcPluginNonEmptyFromListName =
+        app (app (var ghcPluginNonEmptyFromListName) (var nonEmptyCtor))
 
 mkSpan :: a -> GenLocated (SrcSpanAnn' (EpAnn ann)) a
 mkSpan = L $ SrcSpanAnn EpAnnNotUsed $ UnhelpfulSpan UnhelpfulGenerated
@@ -221,27 +229,59 @@ rewriteToNonEmpty ghcPluginNonEmptyFromListId = \case
                     nonEmptyCtor
                 )
             )
-            r@(L
-                _
-                (ExplicitList listType items)
-            )
+            r
         )
       | varName == ghcPluginNonEmptyFromListId ->
         if isNonEmptyWrapper varType
         -- transform non-empty lists
-        then case items of
-            -- if the list is empty, we just remove our wrapper and let GHC deal with it
-            [] -> pure r
-
-            -- otherwise, we use ctor to create NonEmpty
-            x : xs -> pure $ mkSpan $ HsApp EpAnnNotUsed
-                (mkSpan $ HsApp EpAnnNotUsed nonEmptyCtor x)
-                (mkSpan $ ExplicitList listType xs)
-
+        then pure $ handleListCons nonEmptyCtor r
         -- remove the wrapper for ordinary lists
         else pure r
 
+    -- L
+    --     _
+    --     (HsApp
+    --         _
+    --         (L
+    --             _
+    --             (HsApp
+    --                 _
+    --                 (L
+    --                     _
+    --                     (XExpr
+    --                         (WrapExpr
+    --                             (HsWrap
+    --                                 varType
+    --                                 (HsVar _ (L _ varName))
+    --                             )
+    --                         )
+    --                     )
+    --                 )
+    --                 nonEmptyCtor
+    --             )
+    --         )
+    --         r@(L
+    --             _
+    --             (ArithSeq arithType Nothing (FromTo (L _ from) (L _ to)))
+    --         )
+    --     )
+    --   | varName == ghcPluginNonEmptyFromListId -> pure $ traceShow (prettyPrint arithType) r
+
     expr -> pure expr
+
+  where
+    handleListCons :: LHsExpr GhcTc -> LHsExpr GhcTc -> LHsExpr GhcTc
+    handleListCons nonEmptyCtor r@(L _ e) = case e of
+        (ExplicitList listType items) ->
+            case items of
+                -- if the list is empty, we just remove our wrapper and let GHC deal with it
+                [] -> r
+
+                -- otherwise, we use ctor to create NonEmpty
+                x : xs -> mkSpan $ HsApp EpAnnNotUsed
+                    (mkSpan $ HsApp EpAnnNotUsed nonEmptyCtor x)
+                    (mkSpan $ ExplicitList listType xs)
+        _ -> r
 
 {- | This function uses a dirty hack to check if the inferred type for
 '__xxx_ghc_plugin_nonEmpty_fromList' is for 'NonEmpty'.
@@ -255,6 +295,12 @@ isNonEmptyWrapper hsWrapper = "@NonEmpty" `isInfixOf` strWrapper
         defaultSDocContext { sdocPrintTypecheckerElaboration = True }
         $ pprHsWrapper hsWrapper (\_ -> text "wtf?")
 
+
+
+prettyPrint :: (Outputable o) => o -> String
+prettyPrint =
+    renderWithContext
+        defaultSDocContext { sdocPrintTypecheckerElaboration = True } . ppr
 --------------------------
 -- List wrapper
 --------------------------

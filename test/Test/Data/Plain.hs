@@ -6,7 +6,9 @@ module Test.Data.Plain
     , nonEmptyListInt
     , nonEmptyListBool
     , nonEmptyListSingleton
+    , singletonSequenceEqualBoundInt
     , nonEmptyListExplicit
+    , nonEmptyIntSequence
     ) where
 
 import Data.List.NonEmpty (NonEmpty (..))
@@ -23,6 +25,13 @@ nonEmptyListInt = [5, 10, 7]
 
 nonEmptyListBool :: NonEmpty Bool
 nonEmptyListBool = [True, False]
+
+nonEmptyIntSequence :: NonEmpty Int
+nonEmptyIntSequence = [1..10]
+
+singletonSequenceEqualBoundInt :: NonEmpty Int
+singletonSequenceEqualBoundInt = [1..1]
+
 
 nonEmptyListSingleton :: NonEmpty Int
 nonEmptyListSingleton = [42]

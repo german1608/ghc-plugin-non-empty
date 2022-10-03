@@ -4,6 +4,10 @@
 
 module Test.Data.Fail
     ( emptyNonEmpty
+    , emptySequenceInt
+    -- , emptySequenceNegativeInt
+    -- , emptySequenceEqualBoundInt
+    -- , arithmeticExpresionEvaluatesToEmpty
     ) where
 
 import Data.List.NonEmpty (NonEmpty)
@@ -11,3 +15,13 @@ import Data.List.NonEmpty (NonEmpty)
 
 emptyNonEmpty :: NonEmpty Int
 emptyNonEmpty = []
+
+emptySequenceInt :: NonEmpty Int
+emptySequenceInt = [1..0]
+
+-- emptySequenceNegativeInt :: NonEmpty Int
+-- emptySequenceNegativeInt = [-1..(-2)]
+
+
+-- arithmeticExpresionEvaluatesToEmpty :: NonEmpty Int
+-- arithmeticExpresionEvaluatesToEmpty = [(1 + 1)..1]

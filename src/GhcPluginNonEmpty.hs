@@ -80,7 +80,7 @@ import GHC.Unit.Module.ModSummary (ModSummary)
 import GHC.Utils.Outputable (Outputable, defaultSDocContext, ppr, renderWithContext,
                              sdocPrintTypecheckerElaboration, text)
 import Language.Haskell.Syntax.Decls (HsGroup)
-import Language.Haskell.Syntax.Lit (HsOverLit(..), OverLitVal(..))
+import Language.Haskell.Syntax.Lit (HsOverLit(..), OverLitVal(..), HsLit(..))
 import Language.Haskell.Syntax.Expr (ArithSeqInfo (..), HsExpr (..), LHsExpr)
 import Language.Haskell.Syntax.Extension (NoExtField (..))
 
@@ -256,16 +256,31 @@ rewriteToNonEmpty ghcPluginNonEmptyFromListId = \case
                     (mkSpan $ ExplicitList listType xs)
 
         -- 'Int' literals are using 'HsOverLit' since they may be an 'Int', 'Integer', etc.
-        -- TODO: Split pattern matching in several lines.
+        --
+        -- Handling overloaded literals is tricky, since they include the function to convert
+        -- to the final type. Hence, pattern matching and expression building is ugly.
         ArithSeq
             arithType
-            maybeSyntaxExpr
+            Nothing
             (FromTo
-                fromHsLitLoc@(L
+                (L
                     _
                     (HsOverLit
                         _
-                        (OverLit {ol_val = HsIntegral (IL _ fromIsNeg fromValueNoSign), ol_ext = olExt}
+                        (OverLit
+                            olExt
+                            (HsIntegral (IL _ fromIsNeg fromValueNoSign)) -- Integer literal itself
+                            (HsApp -- function to convert to the final type
+                                _
+                                (L
+                                    _
+                                    (XExpr
+                                        (WrapExpr
+                                            (HsWrap fromIntegralType hsVar@(HsVar NoExtField fromIntegralName))
+                                        )
+                                    )
+                                )
+                                (L _ (HsLit _ (HsInteger _ _ hsLitType))))
                         )
                     )
                 )
@@ -278,17 +293,17 @@ rewriteToNonEmpty ghcPluginNonEmptyFromListId = \case
                             (HsIntegral
                                 (IL _ toIsNeg toValueNoSign)
                             )
-                            _
+                            toWitness
                         )
                     )
                 )
             ) ->
-                if fromValue <= toValue
+                traceShow (show (fromIsNeg, fromValueNoSign) ++ " <> " ++ show (toIsNeg, toValueNoSign)) $ if fromValue <= toValue
                 then mkSpan $ HsApp EpAnnNotUsed
-                    (mkSpan $ HsApp EpAnnNotUsed nonEmptyCtor fromHsLitLoc)
+                    (mkSpan $ HsApp EpAnnNotUsed nonEmptyCtor $ mkLimit fromValue)
                     (mkSpan newArithSeq)
                 -- resulting sequence would be empty
-                else r
+                else traceShow "aqui" r
           where
             fromValue = if fromIsNeg then - fromValueNoSign else fromValueNoSign
             toValue = if toIsNeg then - toValueNoSign else toValueNoSign
@@ -297,7 +312,7 @@ rewriteToNonEmpty ghcPluginNonEmptyFromListId = \case
                 ArithSeq
                     -- TODO: May need to wrap mkSpan on arithType
                     arithType
-                    maybeSyntaxExpr
+                    Nothing
                     (FromTo
                         (mkLimit $ fromValue + 1)
                         (mkLimit $ toValue)
@@ -306,13 +321,28 @@ rewriteToNonEmpty ghcPluginNonEmptyFromListId = \case
             mkLimit :: Integer -> LHsExpr GhcTc
             mkLimit i =
                 mkSpan $ HsOverLit
-                            EpAnnNotUsed
-                            (OverLit
-                                olExt
-                                (HsIntegral (IL NoSourceText False i))
-                                undefined
-                            )
+                        EpAnnNotUsed
+                        (OverLit
+                            olExt
+                            (HsIntegral (IL NoSourceText (i < 0) (removeSign i))) -- Integer literal itself
+                            (HsApp
+                                EpAnnNotUsed
+                                (mkSpan
+                                    (XExpr
+                                        (WrapExpr
+                                            (HsWrap
+                                                fromIntegralType
+                                                (HsVar NoExtField fromIntegralName)
+                                            )
+                                        )
+                                    )
+                                )
+                                (mkSpan
+                                    (HsLit EpAnnNotUsed (HsInteger NoSourceText i hsLitType)))) -- function to convert to the final type
+                        )
 
+            removeSign :: Integer -> Integer
+            removeSign i = if i >= 0 then i else - i
         _ -> r
 
     -- appWithNonEmptyCtor :: a

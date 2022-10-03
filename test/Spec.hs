@@ -26,11 +26,21 @@ main = hspec $ describe "GhcPluginNonEmpty.plugin" $ do
             Test.nonEmptyListSingleton `shouldBe` 42 :| []
         it "doesn't change explicit non-empty lists" $
             Test.nonEmptyListExplicit `shouldBe` 42 :| [50, 100]
+        it "correctly converts non-empty int sequence list" $
+            Test.nonEmptyIntSequence `shouldBe` 1 :| [2 .. 10]
+        it "correctly converts non-empty int sequence with equal bounds to list" $
+            Test.singletonSequenceEqualBoundInt `shouldBe` 1 :| []
 
-    describe "Fail" $
-        it "compiler error on trying to convert empty list to non-empty" $ do
-            let action = let !x = Test.emptyNonEmpty in pure x
-            action `shouldThrow` \(_ :: TypeError) -> True
+    describe "Fail" $ do
+        it "compiler error on trying to convert empty list to non-empty" $ testTypeError Test.emptyNonEmpty
+        -- it "compiler error on trying to convert empty sequence from positive integers to non-empty"
+        --     $ Test.emptySequenceInt `shouldBe` 1 :| []
+        -- it "compiler error on trying to convert empty sequence from negative integers to non-empty"
+        --     $ testTypeError Test.emptySequenceNegativeInt
+        -- it "compiler error on trying to convert empty sequence from equal bounds to non-empty"
+        --     $ testTypeError Test.emptySequenceEqualBoundInt
+        -- it "compiler error on trying to convert empty sequence from arithmetic expression bounds to non-empty"
+        --     $ testTypeError Test.arithmeticExpresionEvaluatesToEmpty
 
     describe "Overloaded" $ do
         it "doesn't change overloaded ordinary empty list" $
@@ -42,3 +52,8 @@ main = hspec $ describe "GhcPluginNonEmpty.plugin" $ do
         it "runtime error on trying to convert empty list to non-empty" $ do
             let action = let !x = Test.overloadedEmptyNonEmpty in pure x
             action `shouldThrow` \(_ :: ErrorCall) -> True
+
+  where
+    testTypeError failingList = do
+        let action = let !x = failingList in pure x
+        action `shouldThrow` \(_ :: TypeError) -> True

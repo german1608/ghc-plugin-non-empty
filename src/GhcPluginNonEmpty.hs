@@ -72,6 +72,7 @@ import GHC.Tc.Types (TcGblEnv (tcg_binds), TcM)
 import GHC.Tc.Types.Evidence (HsWrapper, pprHsWrapper)
 import GHC.Tc.Utils.Monad (getTopEnv)
 import GHC.Types.SrcLoc (GenLocated (L), SrcSpan (..), UnhelpfulSpanReason (..))
+import GHC.Types.SourceText (IntegralLit(..), SourceText (..))
 import GHC.Types.TyThing (MonadThings (lookupId))
 import GHC.Types.Var (Id)
 import GHC.Unit.Finder (FindResult (..), findImportedModule)
@@ -79,6 +80,7 @@ import GHC.Unit.Module.ModSummary (ModSummary)
 import GHC.Utils.Outputable (Outputable, defaultSDocContext, ppr, renderWithContext,
                              sdocPrintTypecheckerElaboration, text)
 import Language.Haskell.Syntax.Decls (HsGroup)
+import Language.Haskell.Syntax.Lit (HsOverLit(..), OverLitVal(..))
 import Language.Haskell.Syntax.Expr (ArithSeqInfo (..), HsExpr (..), LHsExpr)
 import Language.Haskell.Syntax.Extension (NoExtField (..))
 
@@ -234,45 +236,16 @@ rewriteToNonEmpty ghcPluginNonEmptyFromListId = \case
       | varName == ghcPluginNonEmptyFromListId ->
         if isNonEmptyWrapper varType
         -- transform non-empty lists
-        then pure $ handleListCons nonEmptyCtor r
+        then pure $ wrapWithListCons nonEmptyCtor r
         -- remove the wrapper for ordinary lists
         else pure r
-
-    -- L
-    --     _
-    --     (HsApp
-    --         _
-    --         (L
-    --             _
-    --             (HsApp
-    --                 _
-    --                 (L
-    --                     _
-    --                     (XExpr
-    --                         (WrapExpr
-    --                             (HsWrap
-    --                                 varType
-    --                                 (HsVar _ (L _ varName))
-    --                             )
-    --                         )
-    --                     )
-    --                 )
-    --                 nonEmptyCtor
-    --             )
-    --         )
-    --         r@(L
-    --             _
-    --             (ArithSeq arithType Nothing (FromTo (L _ from) (L _ to)))
-    --         )
-    --     )
-    --   | varName == ghcPluginNonEmptyFromListId -> pure $ traceShow (prettyPrint arithType) r
 
     expr -> pure expr
 
   where
-    handleListCons :: LHsExpr GhcTc -> LHsExpr GhcTc -> LHsExpr GhcTc
-    handleListCons nonEmptyCtor r@(L _ e) = case e of
-        (ExplicitList listType items) ->
+    wrapWithListCons :: LHsExpr GhcTc -> LHsExpr GhcTc -> LHsExpr GhcTc
+    wrapWithListCons nonEmptyCtor r@(L _ e) = case e of
+        ExplicitList listType items ->
             case items of
                 -- if the list is empty, we just remove our wrapper and let GHC deal with it
                 [] -> r
@@ -281,7 +254,70 @@ rewriteToNonEmpty ghcPluginNonEmptyFromListId = \case
                 x : xs -> mkSpan $ HsApp EpAnnNotUsed
                     (mkSpan $ HsApp EpAnnNotUsed nonEmptyCtor x)
                     (mkSpan $ ExplicitList listType xs)
+
+        -- 'Int' literals are using 'HsOverLit' since they may be an 'Int', 'Integer', etc.
+        -- TODO: Split pattern matching in several lines.
+        ArithSeq
+            arithType
+            maybeSyntaxExpr
+            (FromTo
+                fromHsLitLoc@(L
+                    _
+                    (HsOverLit
+                        _
+                        (OverLit {ol_val = HsIntegral (IL _ fromIsNeg fromValueNoSign), ol_ext = olExt}
+                        )
+                    )
+                )
+                (L
+                    _
+                    (HsOverLit
+                        _
+                        (OverLit
+                            _
+                            (HsIntegral
+                                (IL _ toIsNeg toValueNoSign)
+                            )
+                            _
+                        )
+                    )
+                )
+            ) ->
+                if fromValue <= toValue
+                then mkSpan $ HsApp EpAnnNotUsed
+                    (mkSpan $ HsApp EpAnnNotUsed nonEmptyCtor fromHsLitLoc)
+                    (mkSpan newArithSeq)
+                -- resulting sequence would be empty
+                else r
+          where
+            fromValue = if fromIsNeg then - fromValueNoSign else fromValueNoSign
+            toValue = if toIsNeg then - toValueNoSign else toValueNoSign
+
+            newArithSeq =
+                ArithSeq
+                    -- TODO: May need to wrap mkSpan on arithType
+                    arithType
+                    maybeSyntaxExpr
+                    (FromTo
+                        (mkLimit $ fromValue + 1)
+                        (mkLimit $ toValue)
+                    )
+
+            mkLimit :: Integer -> LHsExpr GhcTc
+            mkLimit i =
+                mkSpan $ HsOverLit
+                            EpAnnNotUsed
+                            (OverLit
+                                olExt
+                                (HsIntegral (IL NoSourceText False i))
+                                undefined
+                            )
+
         _ -> r
+
+    -- appWithNonEmptyCtor :: a
+    -- appWithNonEmptyCtor nonEmptyCtor x =
+    --     mkSpan . HsApp EpAnnNotUsed (mkSpan $ HsApp EpAnnNotUsed nonEmptyCtor x)
 
 {- | This function uses a dirty hack to check if the inferred type for
 '__xxx_ghc_plugin_nonEmpty_fromList' is for 'NonEmpty'.

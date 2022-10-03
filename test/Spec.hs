@@ -33,8 +33,8 @@ main = hspec $ describe "GhcPluginNonEmpty.plugin" $ do
 
     describe "Fail" $ do
         it "compiler error on trying to convert empty list to non-empty" $ testTypeError Test.emptyNonEmpty
-        -- it "compiler error on trying to convert empty sequence from positive integers to non-empty"
-        --     $ Test.emptySequenceInt `shouldBe` 1 :| []
+        it "compiler error on trying to convert empty sequence from positive integers to non-empty"
+            $ Test.emptySequenceInt `shouldBe` 1 :| []
         -- it "compiler error on trying to convert empty sequence from negative integers to non-empty"
         --     $ testTypeError Test.emptySequenceNegativeInt
         -- it "compiler error on trying to convert empty sequence from equal bounds to non-empty"
@@ -45,6 +45,8 @@ main = hspec $ describe "GhcPluginNonEmpty.plugin" $ do
     describe "Overloaded" $ do
         it "doesn't change overloaded ordinary empty list" $
             Test.overloadedListEmpty `shouldBe` []
+        it "doesn't change overloaded ordinary empty sequences" $
+            Test.overloadedListEmptySequence `shouldBe` []
         it "doesn't change overloaded ordinary non-empty list" $
             Test.overloadedListInt `shouldBe` [3, 1, 2]
         it "converts overloaded NonEmpty list" $

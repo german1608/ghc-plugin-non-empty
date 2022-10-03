@@ -4,6 +4,7 @@
 
 module Test.Data.Overloaded
    ( overloadedListEmpty
+   , overloadedListEmptySequence
    , overloadedListInt
    , overloadedNonEmptyInt
    , overloadedEmptyNonEmpty
@@ -13,6 +14,9 @@ import Data.List.NonEmpty (NonEmpty)
 
 overloadedListEmpty :: [Int]
 overloadedListEmpty = []
+
+overloadedListEmptySequence :: [Int]
+overloadedListEmptySequence = [10..0]
 
 overloadedListInt :: [Int]
 overloadedListInt = [3, 1, 2]
